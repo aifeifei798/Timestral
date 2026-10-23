@@ -1,0 +1,7 @@
+# torch >= 2.9 的 PyPI 默认 Linux 构建即为 cu130（CUDA 13.0），RTX 5090 (sm_120) 可用
+# 要求 NVIDIA 驱动 >= 580；本机驱动 595.99 (CUDA 13.2) 已验证
+torch>=2.9
+timestral @ git+https://github.com/mistralai/timestral.git
+fastapi>=0.115
+uvicorn[standard]>=0.30
+numpy>=1.26

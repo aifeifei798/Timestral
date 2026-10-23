@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Timestral-209M 预测控制台</title>
+<script src="/static/vendor/tailwind.js"></script>
+<script src="/static/vendor/chart.umd.min.js"></script>
+<script>
+tailwind.config = {
+  theme: {
+    extend: {
+      boxShadow: { glow: '0 0 24px -6px rgba(56,189,248,.35)' },
+      animation: { 'fade-in': 'fadeIn .35s ease-out both' },
+      keyframes: { fadeIn: { from: { opacity: 0, transform: 'translateY(4px)' }, to: { opacity: 1, transform: 'none' } } },
+    }
+  }
+}
+</script>
+<style>
+  textarea, input, select { color-scheme: dark; }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-thumb { background: #334155; border-radius: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+</style>
+</head>
+<body class="bg-slate-950 text-slate-200 min-h-screen antialiased selection:bg-sky-500/30">
+
+<!-- 顶部栏 -->
+<header class="border-b border-slate-800/80 bg-slate-950/80 backdrop-blur sticky top-0 z-20">
+  <div class="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between gap-4">
+    <div class="flex items-center gap-3">
+      <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-sky-500 to-violet-600 grid place-items-center shadow-glow">
+        <svg class="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+      </div>
+      <div>
+        <h1 class="text-lg font-bold tracking-tight bg-gradient-to-r from-sky-300 to-violet-300 bg-clip-text text-transparent">Timestral-209M 预测控制台</h1>
+        <p class="text-xs text-slate-500">零样本时间序列概率预测 · FastAPI</p>
+      </div>
+    </div>
+    <div id="health" class="flex items-center gap-2 text-xs">
+      <span class="px-2.5 py-1 rounded-full bg-slate-800/70 border border-slate-700/70 text-slate-400">连接中…</span>
+    </div>
+  </div>
+</header>
+
+<main class="max-w-7xl mx-auto px-6 py-6 grid gap-6 lg:grid-cols-[380px,1fr] items-start">
+
+  <!-- 左侧：输入面板 -->
+  <section class="space-y-4 animate-fade-in">
+    <div class="rounded-2xl border border-slate-800 bg-slate-900/50 p-4 space-y-3">
+      <div class="flex items-center justify-between">
+        <h2 class="text-sm font-semibold text-slate-300">历史序列</h2>
+        <div class="flex gap-1.5 text-[11px]">
+          <button data-demo="sine" class="demo-btn">正弦</button>
+          <button data-demo="dual"  class="demo-btn">双变量</button>
+          <button data-demo="walk"  class="demo-btn">随机游走</button>
+        </div>
+      </div>
+      <textarea id="series" spellcheck="false"
+        class="w-full h-44 rounded-xl bg-slate-950/80 border border-slate-800 focus:border-sky-500/60 focus:ring-2 focus:ring-sky-500/20 outline-none p-3 font-mono text-xs leading-5 text-slate-300 resize-y placeholder:text-slate-600"
+        placeholder="每行一个变量：1.2, 3.4, , 5.6（空缺留空或 NaN）&#10;单变量一行即可；单列数字自动识别为一个变量"></textarea>
+      <p class="text-[11px] text-slate-500 leading-4">逗号分隔（无逗号时按空白）；缺失用空位 <span class="text-slate-400">1,,3</span> 或 <span class="text-slate-400">NaN</span>。最长 32,768 步。</p>
+    </div>
+
+    <div class="rounded-2xl border border-slate-800 bg-slate-900/50 p-4 space-y-4">
+      <h2 class="text-sm font-semibold text-slate-300">预测参数</h2>
+
+      <div>
+        <div class="flex justify-between text-xs mb-1.5">
+          <span class="text-slate-400">预测步数</span>
+          <span class="font-mono text-sky-300 tabular-nums" id="plLabel">48</span>
+        </div>
+        <div class="flex items-center gap-3">
+          <input id="plRange" type="range" min="8" max="1024" step="8" value="48"
+            class="flex-1 accent-sky-500 cursor-pointer">
+          <input id="plNum" type="number" min="1" max="4096" value="48"
+            class="w-20 rounded-lg bg-slate-950/80 border border-slate-800 focus:border-sky-500/60 outline-none px-2 py-1 text-sm font-mono tabular-nums text-right">
+        </div>
+      </div>
+
+      <div>
+        <div class="flex justify-between items-baseline mb-1.5">
+          <span class="text-xs text-slate-400">分位数（共 <span id="qCount">3</span> 个）</span>
+          <span class="text-[11px] text-slate-500">区间带 = 最小/最大选中值</span>
+        </div>
+        <div id="qChips" class="flex flex-wrap gap-1.5 text-[11px] font-mono"></div>
+      </div>
+
+      <label class="flex items-center justify-between cursor-pointer group">
+        <span class="text-xs text-slate-400 group-hover:text-slate-300 transition-colors">对称平均 <span class="text-slate-600">(更稳，约 2 倍算力)</span></span>
+        <input id="optSym" type="checkbox" checked class="accent-sky-500 w-4 h-4 cursor-pointer">
+      </label>
+      <label class="flex items-center justify-between cursor-pointer group -mt-2">
+        <span class="text-xs text-slate-400 group-hover:text-slate-300 transition-colors">非负截断</span>
+        <input id="optClip" type="checkbox" checked class="accent-sky-500 w-4 h-4 cursor-pointer">
+      </label>
+
+      <button id="run" class="w-full py-2.5 rounded-xl font-semibold text-sm text-white bg-gradient-to-r from-sky-500 to-violet-500 hover:brightness-110 active:scale-[.98] transition shadow-glow disabled:opacity-50 disabled:cursor-wait flex items-center justify-center gap-2">
+        <svg id="spin" class="hidden w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-90" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"/></svg>
+        <span id="runText">开始预测</span>
+      </button>
+    </div>
+
+    <details class="rounded-2xl border border-slate-800 bg-slate-900/50 p-4 text-xs">
+      <summary class="cursor-pointer font-semibold text-slate-300 select-none">本次请求 (curl)</summary>
+      <pre id="curl" class="mt-3 whitespace-pre-wrap break-all text-[11px] leading-4 text-emerald-300/80 font-mono bg-slate-950/80 rounded-lg p-3 border border-slate-800"></pre>
+    </details>
+  </section>
+
+  <!-- 右侧：结果面板 -->
+  <section class="space-y-4 animate-fade-in">
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div class="stat-card"><span class="stat-label">推理耗时</span><span class="stat-value" id="stMs">—</span></div>
+      <div class="stat-card"><span class="stat-label">上下文长度</span><span class="stat-value" id="stCtx">—</span></div>
+      <div class="stat-card"><span class="stat-label">预测步数</span><span class="stat-value" id="stHor">—</span></div>
+      <div class="stat-card"><span class="stat-label">变量数</span><span class="stat-value" id="stVar">—</span></div>
+    </div>
+
+    <div class="rounded-2xl border border-slate-800 bg-slate-900/50 p-4">
+      <div class="flex items-center justify-between mb-3">
+        <div class="flex items-center gap-4 text-[11px] text-slate-400">
+          <span class="flex items-center gap-1.5"><i class="w-4 h-0.5 rounded-full inline-block" style="background:#38bdf8"></i>历史</span>
+          <span class="flex items-center gap-1.5"><i class="w-4 h-0.5 rounded-full inline-block" style="background:#fbbf24"></i>预测中位数</span>
+          <span class="flex items-center gap-1.5"><i class="w-4 h-3 rounded inline-block" style="background:rgba(251,191,36,.18)"></i>分位数区间</span>
+        </div>
+        <div id="vTabs" class="flex gap-1.5 text-[11px]"></div>
+      </div>
+      <div class="h-[400px]"><canvas id="chart"></canvas></div>
+    </div>
+
+    <div class="rounded-2xl border border-slate-800 bg-slate-900/50 p-4">
+      <h2 class="text-sm font-semibold text-slate-300 mb-3">预测数值 <span class="text-[11px] font-normal text-slate-500">(当前变量 · 前 24 步)</span></h2>
+      <div class="overflow-x-auto">
+        <table class="w-full text-xs font-mono tabular-nums" id="tbl"></table>
+      </div>
+    </div>
+  </section>
+</main>
+
+<!-- 错误提示 -->
+<div id="toast" class="hidden fixed bottom-6 left-1/2 -translate-x-1/2 z-30 max-w-xl px-4 py-3 rounded-xl bg-red-950/90 border border-red-800/80 text-red-200 text-xs shadow-2xl backdrop-blur"></div>
+
+<style type="text/tailwindcss">
+  .demo-btn { @apply px-2.5 py-1 rounded-lg border border-slate-800 bg-slate-900 text-slate-400 hover:text-sky-300 hover:border-sky-600/50 transition; }
+  .stat-card { @apply rounded-xl border border-slate-800 bg-slate-900/50 p-3 flex flex-col gap-1; }
+  .stat-label { @apply text-[11px] text-slate-500; }
+  .stat-value { @apply text-lg font-semibold text-slate-100 tabular-nums; }
+  .pill { @apply px-2.5 py-1 rounded-full bg-slate-800/70 border border-slate-700/70 text-slate-300; }
+  .vtab { @apply px-2.5 py-1 rounded-lg border border-slate-800 bg-slate-900 text-slate-400; }
+  .vtab.active { @apply border-sky-500/60 bg-sky-500/15 text-sky-300; }
+</style>
+
+<script>
+/* ================= 基础状态 ================= */
+const LEVELS = [0.01,0.05,0.1,0.15,0.2,0.25,0.3,0.35,0.4,0.45,0.5,0.55,0.6,0.65,0.7,0.75,0.8,0.85,0.9,0.95,0.99];
+const PALETTE = ['#38bdf8','#34d399','#f472b6','#facc15','#a78bfa','#fb923c','#4ade80','#f87171'];
+let chart = null, state = { history: null, forecast: null, variate: 0 };
+
+const $ = id => document.getElementById(id);
+
+/* ================= 健康检查 ================= */
+fetch('/health').then(r => r.json()).then(h => {
+  $('health').innerHTML = `
+    <span class="px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-600/40 text-emerald-300 flex items-center gap-1.5">
+      <i class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse inline-block"></i>在线
+    </span>
+    <span class="pill">${h.model}</span>
+    <span class="pill">${h.device.toUpperCase()} · ${h.params_millions}M</span>
+    <span class="pill hidden sm:inline">ctx ${h.max_context.toLocaleString()}</span>`;
+}).catch(() => {
+  $('health').innerHTML = '<span class="px-2.5 py-1 rounded-full bg-red-500/10 border border-red-700/50 text-red-300">服务离线</span>';
+});
+
+/* ================= 分位数 chips ================= */
+const DEFAULT_Q = [0.1, 0.5, 0.9];
+$('qChips').innerHTML = LEVELS.map(q => `
+  <label>
+    <input type="checkbox" class="peer sr-only" value="${q}" ${DEFAULT_Q.includes(q) ? 'checked' : ''}>
+    <span class="inline-block px-2 py-0.5 rounded-md border border-slate-800 bg-slate-900 text-slate-500 cursor-pointer
+                 peer-checked:border-sky-500/60 peer-checked:bg-sky-500/15 peer-checked:text-sky-300 transition">${q}</span>
+  </label>`).join('');
+$('qChips').addEventListener('change', () =>
+  $('qCount').textContent = [...$('qChips').querySelectorAll(':checked')].length);
+
+/* ================= 预测步数 双向绑定 ================= */
+$('plRange').addEventListener('input', e => { $('plNum').value = e.target.value; $('plLabel').textContent = e.target.value; });
+$('plNum').addEventListener('input', e => {
+  const v = Math.max(1, Math.min(4096, +e.target.value || 1));
+  $('plRange').value = Math.min(1024, Math.round(v / 8) * 8);
+  $('plLabel').textContent = $('plRange').value;
+});
+
+/* ================= 示例数据 ================= */
+const noise = () => (Math.random() - 0.5) * 0.6;
+const DEMOS = {
+  sine: () => [Array.from({length: 240}, (_, i) => +(10 + 3 * Math.sin(i / 12) + noise()).toFixed(3))],
+  dual: () => [
+    Array.from({length: 240}, (_, i) => +(100 + 0.2 * i + 8 * Math.sin(2 * Math.PI * i / 48) + noise()).toFixed(2)),
+    Array.from({length: 240}, (_, i) => +(50 + 0.1 * i + 5 * Math.sin(2 * Math.PI * i / 24 + 1) + noise()).toFixed(2)),
+  ],
+  walk: () => { let v = 0; return [Array.from({length: 240}, () => +(v += noise() * 2).toFixed(3))]; },
+};
+document.querySelectorAll('.demo-btn').forEach(b => b.addEventListener('click', () => {
+  const vs = DEMOS[b.dataset.demo]();
+  $('series').value = vs.map(r => r.join(', ')).join('\n');
+  runForecast();
+}));
+
+/* ================= 解析输入 ================= */
+function parseSeries() {
+  const lines = $('series').value.split('\n').map(l => l.trim()).filter(l => l.length);
+  if (!lines.length) throw new Error('请输入历史序列');
+  let rows = lines.map(line => {
+    // 有逗号/分号时以逗号为主分隔符（空字段 = 缺失，如 "1,,3"）；否则按空白分隔
+    const tokens = /[,;]/.test(line)
+      ? line.split(/[,;]/).map(t => t.trim())
+      : line.split(/\s+/).map(t => t.trim());
+    while (tokens.length && tokens[tokens.length - 1] === '') tokens.pop();
+    while (tokens.length && tokens[0] === '') tokens.shift();
+    return tokens.map(t =>
+      t === '' || /^nan$/i.test(t) || t === 'null' ? null : Number(t));
+  });
+  // 单列数字（每行一个值）识别为单变量
+  if (rows.length > 1 && rows.every(r => r.length === 1)) rows = [rows.flat()];
+  if (rows.some(r => r.some(v => v === null || Number.isNaN(v)))) {
+    const bad = rows.flat().find(v => v !== null && Number.isNaN(v));
+    if (bad !== undefined) throw new Error(`无法解析的数值: "${bad}"`);
+  }
+  if (rows.length > 1 && rows.some(r => r.length !== rows[0].length))
+    throw new Error('多变量的每一行长度必须一致');
+  if (rows[0].length < 2) throw new Error('序列太短（至少 2 个观测）');
+  return rows;
+}
+
+/* ================= 预测请求 ================= */
+function buildPayload(rows) {
+  const checked = [...new Set([...$('qChips').querySelectorAll(':checked')].map(c => +c.value))].sort((a, b) => a - b);
+  if (!checked.length) throw new Error('至少选择一个分位数');
+  if (!checked.includes(0.5)) checked.push(0.5);
+  return {
+    series: rows.length === 1 ? rows[0] : rows,
+    prediction_length: Math.max(1, Math.min(4096, +$('plNum').value || 48)),
+    quantiles: checked,
+    symmetric_averaging: $('optSym').checked,
+    clip_nonnegative: $('optClip').checked,
+  };
+}
+
+async function runForecast() {
+  const btn = $('run');
+  btn.disabled = true; $('spin').classList.remove('hidden'); $('runText').textContent = '推理中…';
+  try {
+    const rows = parseSeries();
+    const payload = buildPayload(rows);
+    $('curl').textContent = `curl -s http://${location.host}/forecast \\\n  -H 'Content-Type: application/json' \\\n  -d '${JSON.stringify(payload)}'`;
+    const res = await fetch('/forecast', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload) });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || res.statusText);
+    state.history = rows; state.forecast = data; state.variate = 0;
+    renderResult(payload);
+  } catch (e) { toast(e.message || String(e)); }
+  finally {
+    btn.disabled = false; $('spin').classList.add('hidden'); $('runText').textContent = '开始预测';
+  }
+}
+$('run').addEventListener('click', runForecast);
+$('series').addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') runForecast(); });
+
+/* ================= 结果渲染 ================= */
+function renderResult(payload) {
+  const fc = state.forecast, H = payload.prediction_length;
+  $('stMs').textContent = fc.inference_ms + ' ms';
+  $('stCtx').textContent = fc.forecast.context_length.toLocaleString();
+  $('stHor').textContent = H.toLocaleString();
+  $('stVar').textContent = fc.forecast.num_variates;
+
+  const tabs = $('vTabs');
+  tabs.innerHTML = fc.forecast.num_variates > 1
+    ? fc.forecast.variates.map(v =>
+        `<button data-v="${v.variate_index}" class="vtab px-2.5 py-1 rounded-lg border transition">变量 ${v.variate_index + 1}</button>`).join('')
+    : '<span class="text-slate-600">单变量</span>';
+  tabs.querySelectorAll('.vtab').forEach(b => b.addEventListener('click', () => { state.variate = +b.dataset.v; syncTabs(); renderChart(); renderTable(); }));
+  syncTabs();
+  renderChart(); renderTable();
+}
+
+function syncTabs() {
+  document.querySelectorAll('.vtab').forEach(b =>
+    b.classList.toggle('active', +b.dataset.v === state.variate));
+}
+
+function renderChart() {
+  const fc = state.forecast, v = fc.forecast.variates[state.variate];
+  const hist = state.history[state.variate] ?? state.history[0];
+  const n = hist.length, H = v.median.length;
+  const qs = Object.keys(v.quantiles).map(Number).sort((a, b) => a - b);
+  const lo = qs[0] !== 0.5 || qs.length > 1 ? qs[0] : null;
+  const hi = qs.length > 1 ? qs[qs.length - 1] : null;
+  const labels = Array.from({length: n + H}, (_, i) => i);
+  const pad = k => [...Array(n).fill(null), ...k];
+
+  const datasets = [{
+    label: '历史', data: hist, borderColor: PALETTE[state.variate % PALETTE.length],
+    borderWidth: 1.5, pointRadius: 0, tension: .25,
+  }, {
+    label: '中位数', data: [...Array(n - 1).fill(null), ...[hist[n - 1], ...v.median]],
+    borderColor: '#fbbf24', borderWidth: 2, borderDash: [5, 3], pointRadius: 0, tension: .25,
+  }];
+  if (hi !== null) {
+    datasets.push({
+      label: 'band', data: pad(v.quantiles[String(lo)]), backgroundColor: 'rgba(251,191,36,.14)',
+      borderWidth: 0, pointRadius: 0, fill: '+1', tension: .25,
+    }, {
+      label: 'band-top', data: pad(v.quantiles[String(hi)]), borderWidth: 0, pointRadius: 0, tension: .25,
+    });
+  }
+
+  const cfg = {
+    type: 'line',
+    data: { labels, datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: false },
+        splitLine: { n },
+        tooltip: {
+          backgroundColor: '#0f172aee', borderColor: '#334155', borderWidth: 1,
+          titleColor: '#e2e8f0', bodyColor: '#94a3b8', padding: 10, displayColors: false,
+          callbacks: { label: c => `${c.dataset.label}: ${fmt(c.parsed.y)}` },
+        },
+      },
+      scales: {
+        x: { grid: { display: false }, ticks: { maxTicksLimit: 12, color: '#475569', font: { size: 10 } } },
+        y: { grid: { color: 'rgba(148,163,184,.08)' }, ticks: { color: '#475569', font: { size: 10 } } },
+      },
+    },
+  };
+  if (chart) { chart.data = cfg.data; chart.options = cfg.options; chart.update(); }
+  else { Chart.register(splitLinePlugin); chart = new Chart($('chart'), cfg); }
+}
+
+const splitLinePlugin = {
+  id: 'splitLine',
+  afterDatasetsDraw(c) {
+    const n = c.options.plugins.splitLine?.n; if (!n) return;
+    const x = c.scales.x.getPixelForValue(n - 1), {top, bottom, left, right} = c.chartArea;
+    if (x < left || x > right) return;
+    const ctx = c.ctx; ctx.save();
+    ctx.setLineDash([4, 4]); ctx.strokeStyle = 'rgba(148,163,184,.35)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x, bottom); ctx.stroke();
+    ctx.setLineDash([]); ctx.fillStyle = 'rgba(148,163,184,.55)'; ctx.font = '10px ui-sans-serif';
+    ctx.fillText('预测 →', x + 6, top + 12); ctx.restore();
+  }
+};
+
+function renderTable() {
+  const fc = state.forecast, v = fc.forecast.variates[state.variate];
+  const qs = Object.keys(v.quantiles).map(Number).sort((a, b) => a - b).filter(q => q !== 0.5);
+  const head = `<thead><tr class="text-slate-500 border-b border-slate-800 text-left">
+    <th class="py-1.5 pr-4 font-medium">步</th><th class="py-1.5 pr-4 font-medium text-amber-300/80">median</th>
+    ${qs.map(q => `<th class="py-1.5 pr-4 font-medium">q${q}</th>`).join('')}</tr></thead>`;
+  const rows = Array.from({length: Math.min(24, v.median.length)}, (_, i) =>
+    `<tr class="border-b border-slate-800/50 hover:bg-slate-800/30">
+      <td class="py-1 pr-4 text-slate-500">${i + 1}</td>
+      <td class="py-1 pr-4 text-amber-200/90">${fmt(v.median[i])}</td>
+      ${qs.map(q => `<td class="py-1 pr-4 text-slate-400">${fmt(v.quantiles[String(q)][i])}</td>`).join('')}
+    </tr>`).join('');
+  $('tbl').innerHTML = head + `<tbody>${rows}</tbody>`;
+}
+
+const fmt = v => v == null ? '—' : Math.abs(v) >= 10000 ? v.toExponential(2) : Math.round(v * 1000) / 1000;
+let toastTimer;
+function toast(msg) {
+  const t = $('toast'); t.textContent = '⚠ ' + msg; t.classList.remove('hidden');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.add('hidden'), 5000);
+}
+
+/* ================= 初始：载入示例并预测 ================= */
+$('series').value = DEMOS.sine().map(r => r.join(', ')).join('\n');
+runForecast();
+</script>
+</body>
+</html>
